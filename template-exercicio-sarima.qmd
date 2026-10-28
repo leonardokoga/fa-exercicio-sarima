@@ -73,6 +73,60 @@ df_sf.head()
 
 ## Análise descritiva
 
+```{python}
+import matplotlib.pyplot as plt
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+df_sf["ds"] = pd.to_datetime(df_sf["ds"])
+y = df_sf.set_index("ds")["y"].asfreq("MS")
+print(y.isna().sum(), len(y))  
+``` 
+
+Gráfico
+``` {python}
+fig, ax = plt.subplots(figsize=(12, 4))
+y.plot(ax=ax, title="São Paulo: volume de vendas do varejo ampliado (2022 = 100)")
+ax.set_xlabel("")
+plt.show()
+```
+
+Sazonalidade
+```{python}
+indice = y / y.rolling(12, center=True).mean()   # remove a tendência
+(indice.to_frame("indice")
+       .assign(mes=indice.index.month)
+       .boxplot(column="indice", by="mes", figsize=(10, 4)))
+plt.suptitle("")
+plt.title("Índice sazonal por mês (1,0 = média móvel de 12 meses)")
+plt.show()
+```
+
+ACF e PACF
+```{python}
+fig, ax = plt.subplots(1, 2, figsize=(14, 4))
+plot_acf(y, lags=48, ax=ax[0], title="ACF da série original")
+plot_pacf(y, lags=48, ax=ax[1], title="PACF da série original", method="ywm")
+plt.tight_layout()
+plt.show()
+```
+
+Estacionariedade
+```{python}
+from statsmodels.tsa.stattools import adfuller, kpss
+from statsforecast.arima import ndiffs, nsdiffs
+
+print("nsdiffs:", nsdiffs(y.values, period=12), "| ndiffs:", ndiffs(y.values))
+
+def testes(x, nome):
+    x = x.dropna()
+    print(nome, "ADF p=%.4f | KPSS p=%.4f" % (
+        adfuller(x, autolag="AIC")[1], kpss(x, regression="c", nlags="auto")[1]))
+
+testes(y, "original")
+testes(y.diff(12), "D=1")
+testes(y.diff(12).diff(), "D=1, d=1")
+```
+
 ## Modelagem
 
 ## Previsão · 24 meses à frente
