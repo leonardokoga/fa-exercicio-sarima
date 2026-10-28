@@ -6,7 +6,7 @@ format:
 jupyter: python3
 ---
 
-## Sobre o exercício
+# Sobre o exercício
 
 A base é a **PMC** (Pesquisa Mensal do Comércio) do IBGE: índice de volume de vendas no **comércio varejista ampliado** (inclui veículos e materiais de construção), por **Unidade da Federação**, mensal de jan/2004 em diante. Base 2022 = 100, **sem ajuste sazonal**.
 
@@ -32,7 +32,7 @@ Análise e entrega
 9. Compilar este arquivo em um relatório em HTML chamado index.html e subir no repositório do GitHub que você criou para este lab. 
 10. Configure as github pages para servir o conteúdo do repositório, e compartilhe o link no formulário de entrega do BB.
 
-## Setup
+# Setup
 
 ```{python}
 import numpy as np
@@ -46,7 +46,7 @@ from statsforecast import StatsForecast
 from statsforecast.models import AutoARIMA, ARIMA
 ```
 
-## Carregando a base PMC
+# Carregando a base PMC
 
 A base já foi pré-processada para conter apenas as colunas relevantes, e já no formato "long" (uma linha por data + UF). O nome da coluna de data é "data", e a coluna de interesse (índice de volume) é "volume_idx". A coluna "uf" indica a Unidade da Federação.
 
@@ -54,7 +54,7 @@ A base já foi pré-processada para conter apenas as colunas relevantes, e já n
 pmc = pd.read_csv("dados/pmc_volume_uf.csv")
 ```
 
-## Escolha sua UF
+# Escolha sua UF
 
 ```{python}
 
@@ -71,7 +71,7 @@ df_sf = (
 df_sf.head()
 ```
 
-## Análise descritiva
+# Análise descritiva
 
 ```{python}
 import matplotlib.pyplot as plt
@@ -82,7 +82,7 @@ y = df_sf.set_index("ds")["y"].asfreq("MS")
 print(y.isna().sum(), len(y))  
 ``` 
 
-Gráfico
+## Gráfico
 ``` {python}
 fig, ax = plt.subplots(figsize=(12, 4))
 y.plot(ax=ax, title="São Paulo: volume de vendas do varejo ampliado (2022 = 100)")
@@ -90,7 +90,7 @@ ax.set_xlabel("")
 plt.show()
 ```
 
-Sazonalidade
+## Sazonalidade
 ```{python}
 indice = y / y.rolling(12, center=True).mean()   # remove a tendência
 (indice.to_frame("indice")
@@ -101,7 +101,7 @@ plt.title("Índice sazonal por mês (1,0 = média móvel de 12 meses)")
 plt.show()
 ```
 
-ACF e PACF
+## ACF e PACF
 ```{python}
 fig, ax = plt.subplots(1, 2, figsize=(14, 4))
 plot_acf(y, lags=48, ax=ax[0], title="ACF da série original")
@@ -110,7 +110,14 @@ plt.tight_layout()
 plt.show()
 ```
 
-Estacionariedade
+Tendência. Achado: crescimento até 2013, queda até 2016 e platô desde 2021, sem tendência recente de alta. Evidência: média anual de 57,8 (2004), 109,5 (2013), 89,9 (2016) e entre 100 e 104 (2021 a 2025); ACF com decaimento lento. Implicação: série não estacionária em nível, com d = 1 provável.
+
+Choques. Achado: a recessão de 2014-2016 foi lenta e prolongada; a queda de 2020 foi abrupta e curta (68,7 em abril, 93,4 em junho). Implicação: são episódios atípicos que podem aparecer nos resíduos do modelo e ampliar a incerteza das previsões.
+
+Sazonalidade. Achado: dezembro forte (1,20), fevereiro fraco (0,89), novembro modesto (1,04). Evidência: PACF com barras significativas nos lags 12, 13 e 25. Implicação: diferença sazonal (D = 1) provável, a confirmar com nsdiffs e testes ADF e KPSS.
+
+
+## Estacionariedade
 ```{python}
 from statsmodels.tsa.stattools import adfuller, kpss
 from statsforecast.arima import ndiffs, nsdiffs
@@ -127,16 +134,82 @@ testes(y.diff(12), "D=1")
 testes(y.diff(12).diff(), "D=1, d=1")
 ```
 
-## Modelagem
+# Modelagem
 
-## Previsão · 24 meses à frente
+## AutoARIMA
+```{python}
+from statsforecast import StatsForecast
+from statsforecast.models import AutoARIMA
 
-## Discussão
+sf = StatsForecast(models=[AutoARIMA(season_length=12)], freq="MS", n_jobs=1)
+sf.fit(df_sf)
+
+modelo = sf.fitted_[0, 0].model_
+p, q, P, Q, s, d, D = modelo["arma"]
+print(f"(p,d,q)(P,D,Q)[s] = ({p},{d},{q})({P},{D},{Q})[{s}]")
+print(modelo["coef"])
+print("AICc:", modelo["aicc"])
+```
+
+## Resíduos
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+from statsmodels.graphics.tsaplots import plot_acf
+from statsmodels.graphics.gofplots import qqplot
+from statsmodels.stats.diagnostic import acorr_ljungbox
+
+res = pd.Series(np.asarray(modelo["residuals"]), index=y.index).iloc[d + D * s:]
+
+fig, ax = plt.subplots(2, 2, figsize=(13, 7))
+ax[0, 0].plot(res); ax[0, 0].axhline(0, color="red"); ax[0, 0].set_title("Resíduos no tempo")
+plot_acf(res, lags=36, ax=ax[0, 1], title="ACF dos resíduos")
+ax[1, 0].hist(res, bins=30, density=True); ax[1, 0].set_title("Distribuição")
+qqplot(res, line="s", ax=ax[1, 1]); ax[1, 1].set_title("Q-Q plot")
+plt.tight_layout(); plt.show()
+
+print(acorr_ljungbox(res, lags=[12, 24], model_df=p + q + P + Q).round(4))
+```
+
+# Previsão · 24 meses à frente
+```{python}
+fc = sf.predict(h=24, level=[80, 95])
+f = fc.set_index("ds")
+hist = y.iloc[-84:]
+
+fig, ax = plt.subplots(figsize=(12, 4))
+ax.plot(hist.index, hist.values, label="Histórico")
+ax.plot(f.index, f["AutoARIMA"], color="red", label="Previsão")
+ax.fill_between(f.index, f["AutoARIMA-lo-95"], f["AutoARIMA-hi-95"], alpha=0.15, color="red", label="IC 95%")
+ax.fill_between(f.index, f["AutoARIMA-lo-80"], f["AutoARIMA-hi-80"], alpha=0.30, color="red", label="IC 80%")
+ax.legend(); plt.show()
+```
+
+## ACF/PACF série diferenciada
+
+```{python}
+x = y.diff(12).diff().dropna()
+fig, ax = plt.subplots(1, 2, figsize=(14, 4))
+plot_acf(x, lags=36, ax=ax[0], title="ACF (d=1, D=1)")
+plot_pacf(x, lags=36, ax=ax[1], title="PACF (d=1, D=1)", method="ywm")
+plt.tight_layout(); plt.show()
+```
+
+# Discussão
 
 Escreva 4-5 linhas comentando:
 
 1. O ACF/PACF da série original sugeriu sazonalidade? E tendência? Bate com o que você viu no gráfico de linha?
+A ACF apresentou um decaimento lento, indicando tendência na série. Já a PACF apresentou picos nos lags 12, 13 e 25, sugerindo sazonalidade anual. Isso está de acordo com o gráfico de linha, que mostra variações ao longo do tempo, com valores mais altos em dezembro e mais baixos em fevereiro.
+
 2. Quantas diferenças (regular e sazonal) o AutoARIMA aplicou? E os componentes AR/MA? Conseguiu observar isso no ACF/PACF?
+O AutoARIMA aplicou uma diferença regular (\(d=1\)) e uma diferença sazonal (\(D=1\)), com período de 12 meses. O modelo selecionado foi ARIMA(2,1,1)(0,1,1)[12]. Os coeficientes foram 0,51 para AR(1), próximo de zero para AR(2), −0,80 para MA(1) e −0,86 para MA sazonal. Na série original, não é possível identificar claramente todos esses componentes apenas pela ACF e PACF.
+
 3. Os resíduos parecem white noise? Algum padrão remanescente sazonal?
+Os resíduos apresentaram média próxima de zero e ACF dentro dos limites de confiança. Porém, o teste de Ljung-Box teve resultado misto: p = 0,043 no lag 12 e p = 0,187 no lag 24. Isso indica que ainda há evidência de autocorrelação no lag 12, portanto, não podemos afirmar que os resíduos sejam completamente white noise. Também foram observados outliers e caudas pesadas na distribuição.
+
 4. A previsão pareceu razoável visualmente (captura a sazonalidade, fica bem ancorada no histórico, intervalos abrem muito com o horizonte)?
+A previsão parece razoável, pois mantém o nível próximo ao histórico e acompanha a sazonalidade, com pico em dezembro e vale em fevereiro. A queda observada no início do ano corresponde à sazonalidade de janeiro e fevereiro, e não necessariamente a uma nova tendência de queda. Os intervalos de confiança aumentam de aproximadamente 16 pontos no primeiro mês para 39 pontos em 24 meses, mostrando que a incerteza cresce com o horizonte da previsão.
+
 5. Que outras UFs você imagina que dariam um SARIMA bem diferente do seu (e por quê)? Pense em estados de regiões diferentes, com perfil econômico distinto.
+Mato Grosso poderia apresentar um modelo diferente devido à forte atividade agropecuária, com possíveis variações relacionadas ao calendário das safras. Já o Amazonas, por ter uma economia com forte presença da Zona Franca de Manaus, poderia apresentar outros padrões de tendência e sazonalidade. Essas diferenças econômicas podem influenciar o comportamento e a volatilidade das séries, embora isso precisasse ser confirmado pela análise dos dados de cada estado.
