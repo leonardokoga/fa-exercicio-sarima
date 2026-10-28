@@ -1,6 +1,8 @@
 ---
 title: "Exercício: SARIMA no comércio varejista brasileiro"
-format: html
+format:
+  html:
+    embed-resources: true
 jupyter: python3
 ---
 
@@ -49,7 +51,7 @@ from statsforecast.models import AutoARIMA, ARIMA
 A base já foi pré-processada para conter apenas as colunas relevantes, e já no formato "long" (uma linha por data + UF). O nome da coluna de data é "data", e a coluna de interesse (índice de volume) é "volume_idx". A coluna "uf" indica a Unidade da Federação.
 
 ```{python}
-pmc = pd.read_csv("https://github.com/padsInsper/202634-fa/releases/download/data/pmc_volume_uf.csv")
+pmc = pd.read_csv("dados/pmc_volume_uf.csv")
 ```
 
 ## Escolha sua UF
